@@ -1,0 +1,5 @@
+let nil := \c n. n in
+let cons := \x xs c n. c x (xs c n) in
+let foldl := \f a l. l (\v g z. g (f z v)) (\x.x) a in
+let flip := \f a b. f b a in
+foldl (flip cons) nil
