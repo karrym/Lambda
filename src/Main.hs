@@ -35,7 +35,7 @@ toNumber (IxLam (IxLam l)) = go l where
     go (IxApp (Index 1) x) = (+ 1) <$> go x
     go (Index 0)           = return 0
     go _                   = Nothing
-toNumber (Closure _ l)     = toNumber l
+toNumber (Clojure _ l)     = toNumber l
 toNumber _                 = Nothing
 
 fromNumber :: Int -> IxLam
@@ -52,13 +52,19 @@ toString (IxLam (IxLam l)) = go l where
                                        Nothing -> "Wrong integer format."
     go (Index 0) = []
     go _ = "Wrong string format."
-toString (Closure _ l) = toString (IxLam l)
+toString (Clojure _ l) = toString (IxLam l)
 toString _ = "Wrong string format."
 
 fromString :: String -> IxLam
 fromString = IxLam . IxLam . go where
     go [] = Index 0
     go (x:xs) = IxApp (IxApp (Index 1) (fromNumber $ ord x)) $ go xs
+
+ortho :: IxLam -> IxLam
+ortho (Clojure _ l) = IxLam (ortho l)
+ortho (IxLam l) = IxLam (ortho l)
+ortho (IxApp a b) = IxApp (ortho a) (ortho b)
+ortho (Index i) = Index i
 
 fromNumber' :: Int -> Lambda
 fromNumber' 0 = Lam "s" (Lam "z" (Var "z"))
@@ -73,7 +79,7 @@ fromString' = Lam "c" . Lam "n" . go where
 
 correct :: Type -> Bool
 correct t = isJust $ unify [(t, c)] where
-    Just c = parse (evalStateT tfun (maxVar t + 1, M.empty)) "((((a->a)->a->a)->b->b)->b->b)->(((a->a)->a->a)->b->b)->b->b"
+    Just c = parse (evalStateT tfun (maxVar t + 1, M.empty)) "((((a->a)->a->a)->b->b)->b->b)->(((c->c)->c->c)->d->d)->d->d"
 
 main :: IO ()
 main = do
@@ -85,9 +91,8 @@ main = do
                 input <- getContents
                 case eval code of
                     Left s -> putStrLn s
-                    Right (Forall _ t, m) -> do
+                    Right (t, m) -> do
                         print t
-                        m >>= reduce IM.empty >>= print
                         if not $ correct t
                             then do
                                 putStrLn "Type incorrect"
@@ -95,6 +100,7 @@ main = do
                             else do
                                 l <- m
                                 r <- reduce IM.empty . IxApp l $ fromString input
+                                print r
                                 putStrLn $ toString r
             _ -> do
                 prog <- getProgName

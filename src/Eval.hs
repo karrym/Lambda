@@ -22,22 +22,24 @@ addExpr l = IM.insert 0 l . IM.mapKeys succ
 
 reduce :: Env -> IxLam -> IO IxLam
 reduce env (Index i) = do
-        let ref = env IM.! i
-        v <- readIORef ref
-        case v of
-            Value e -> return e
-            Thunk e f -> do
-                r <- reduce e f
-                writeIORef ref (Value r)
-                return r
-reduce env (IxLam l) = return $ Closure env l
+        case IM.lookup i env of
+            Nothing -> return $ Index i
+            Just ref -> do
+                v <- readIORef ref
+                case v of
+                    Value e -> return e
+                    Thunk e f -> do
+                        r <- reduce e f
+                        writeIORef ref (Value r)
+                        return r
+reduce env (IxLam l) = return $ Clojure env l
 reduce env (IxLet a b) = do
         ref <- newIORef (Thunk env a)
         reduce (addExpr ref env) b
 reduce env (IxApp a b) = do
         l <- reduce env a
         case l of
-            Closure e c -> do
+            Clojure e c -> do
                 ref <- newIORef (Thunk env b)
                 reduce (addExpr ref e) c
             c -> IxApp c <$> reduce env b
@@ -46,7 +48,7 @@ reduce env f@(IxFix e) = do
         reduce (addExpr ref env) e
 reduce _ a = return a
 
-eval :: String -> Either String (Scheme, IO IxLam)
+eval :: String -> Either String (Type, IO IxLam)
 eval str = do
         v <- maybe (Left "Could not parse.") Right $ parse assign str
         e <- maybe (Left "This term includes free variable.") Right $ toIndexed v

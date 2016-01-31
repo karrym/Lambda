@@ -21,7 +21,7 @@ data IxLam = Index Int
            | IxApp IxLam IxLam
            | IxLam IxLam
            | IxLet IxLam IxLam
-           | Closure Env IxLam
+           | Clojure Env IxLam
            | IxFix IxLam
            deriving (Eq)
 
@@ -42,7 +42,7 @@ instance Show IxLam where
             close a b = if a > b then ")" else ""
             showExpr :: Int -> IxLam -> String
             showExpr _ (Index i)   = show i
-            showExpr _ (Closure v a) = "(Closure)[λ." ++ showExpr 0 a ++ "]"
+            showExpr _ (Clojure v a) = "(Clojure)[λ." ++ showExpr 0 a ++ "]"
             showExpr n (IxLet a b) = open n 0 ++ "let . = " ++ showExpr 0 a ++ " in " ++ showExpr 0 b ++ close n 0
             showExpr n (IxLam l)   = open n 1 ++ "λ." ++ showExpr 1 l ++ close n 1
             showExpr n (IxFix e) = open n 2 ++ "fix " ++ showExpr 2 e ++ close n 2
