@@ -13,7 +13,6 @@ import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import Data.Char
 import Data.Maybe (isJust)
-import Debug.Trace
 
 getInput :: IO String
 getInput = putStr "λ> " >> hFlush stdout >> getLine
@@ -24,8 +23,7 @@ repl = do
         unless (input == "quit" || input == "q") $ do
             case eval input of
                 Left err -> putStrLn err
-                Right (t, m) -> do
-                    e <- m
+                Right (t, e) -> do
                     putStrLn $ "type: " ++ show t
                     putStrLn $ "value: " ++ show e
             repl
@@ -35,7 +33,6 @@ toNumber (IxLam (IxLam l)) = go l where
     go (IxApp (Index 1) x) = (+ 1) <$> go x
     go (Index 0)           = return 0
     go _                   = Nothing
-toNumber (Clojure _ l)     = toNumber l
 toNumber _                 = Nothing
 
 fromNumber :: Int -> IxLam
@@ -48,23 +45,16 @@ fromNumber n = case fromNumber (n-1) of
 toString :: IxLam -> String
 toString (IxLam (IxLam l)) = go l where
     go (IxApp (IxApp (Index 1) a) b) = case toNumber a of
-                                       Just c -> chr c : go b
-                                       Nothing -> "Wrong integer format."
+                                           Just c -> chr c : go b
+                                           Nothing -> "Wrong integer format."
     go (Index 0) = []
     go _ = "Wrong string format."
-toString (Clojure _ l) = toString (IxLam l)
 toString _ = "Wrong string format."
 
 fromString :: String -> IxLam
 fromString = IxLam . IxLam . go where
     go [] = Index 0
     go (x:xs) = IxApp (IxApp (Index 1) (fromNumber $ ord x)) $ go xs
-
-ortho :: IxLam -> IxLam
-ortho (Clojure _ l) = IxLam (ortho l)
-ortho (IxLam l) = IxLam (ortho l)
-ortho (IxApp a b) = IxApp (ortho a) (ortho b)
-ortho (Index i) = Index i
 
 fromNumber' :: Int -> Lambda
 fromNumber' 0 = Lam "s" (Lam "z" (Var "z"))
@@ -79,7 +69,8 @@ fromString' = Lam "c" . Lam "n" . go where
 
 correct :: Type -> Bool
 correct t = isJust $ unify [(t, c)] where
-    Just c = parse (evalStateT tfun (maxVar t + 1, M.empty)) "((((a->a)->a->a)->b->b)->b->b)->(((c->c)->c->c)->d->d)->d->d"
+    Just c = parse (evalStateT tfun (maxVar t + 1, M.empty)) 
+                "((((a->a)->a->a)->b->b)->b->b)->(((c->c)->c->c)->d->d)->d->d"
 
 main :: IO ()
 main = do
@@ -91,16 +82,15 @@ main = do
                 input <- getContents
                 case eval code of
                     Left s -> putStrLn s
-                    Right (t, m) -> do
-                        print t
+                    Right (t, l) -> do
                         if not $ correct t
                             then do
                                 putStrLn "Type incorrect"
-                                putStrLn "correct type: ((((a->a)->a->a)->b->b)->b)->(((a->a)->a->a)->b->b)->b"
+                                putStrLn $ "type: " ++ show t
+                                putStr "correct type:"
+                                putStrLn "((((a->a)->a->a)->b->b)->b)->(((c->c)->c->c)->d->d)->d"
                             else do
-                                l <- m
-                                r <- reduce IM.empty . IxApp l $ fromString input
-                                print r
+                                let r = reduce . IxApp l $ fromString input
                                 putStrLn $ toString r
             _ -> do
                 prog <- getProgName

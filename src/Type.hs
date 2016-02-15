@@ -13,7 +13,6 @@ import Control.Monad (guard, replicateM)
 import Control.Applicative (Alternative(..))
 import Control.Monad.Trans.Class (lift)
 import Control.Arrow ((***))
-import Debug.Trace
 
 data Type = TVar Int
           | TFun Type Type
@@ -47,15 +46,6 @@ instance Show Type where
                 s1 <- showExpr 1 a
                 s2 <- showExpr 0 b
                 return $ open n 0 ++ s1 ++ " -> " ++ s2 ++ close n 0
-{-
-instance Show Type where
-        show = showExpr 0 where
-            open  a b = if a > b then "(" else ""
-            close a b = if a > b then ")" else ""
-            showExpr :: Int -> Type -> String
-            showExpr _ (TVar i)   = show i
-            showExpr n (TFun a b) = open n 0 ++ showExpr 1 a ++ " -> " ++ showExpr 0 b ++ close n 0
--}
 
 instance Show Scheme where
         show (Forall a t) = show a ++ '.':show t
@@ -83,7 +73,7 @@ addType :: Scheme -> TypeEnv -> TypeEnv
 addType t = IM.insert 0 t . IM.mapKeys succ
 
 freshType :: Monad m => StateT Int m Type
-freshType = TVar <$> (get <* modify succ)
+freshType = modify succ >> TVar <$> get
 
 subst :: Subst -> Type -> Type
 subst s (TVar i) = maybe (TVar i) id $ IM.lookup i s
@@ -111,7 +101,7 @@ freeType (TVar i) = IS.singleton i
 freeType (TFun a b) = IS.union (freeType a) (freeType b)
 
 toRest :: Subst -> [Rest]
-toRest = IM.foldWithKey (\a t r -> (TVar a, t) : r) []
+toRest = map (TVar *** id) . IM.toList
 
 closure :: Type -> TypeEnv -> Scheme
 closure t e = flip Forall t $ freeType t IS.\\ vs where
@@ -131,23 +121,19 @@ polytype e (Index i) = do
 polytype e (IxLam l) = do
         a <- freshType
         (s, t) <- polytype (addType (Forall IS.empty a) e) l
-        --trace (show s) $ return ()
-        --trace (show t) $ return ()
         return (s, TFun (subst s a) t)
 polytype e (IxApp l r) = do
+        a <- freshType
         (s1, t1) <- polytype e l
         (s2, t2) <- polytype (IM.map (\(Forall s t) -> Forall s $ subst s1 t) e) r
-        a <- freshType
-        --trace (show (subst s2 t1, TFun t2 a)) $ return ()
         s3 <- lift $ unify [(subst s2 t1, TFun t2 a)]
-        --trace (show s3) $ return ()
-        --trace (show a) $ return ()
         s <- lift . unify $ toRest =<< [s1, s2, s3]
         return (s, subst s3 a)
 polytype e (IxLet e1 e2) = do
         (s1, t1) <- polytype e e1
         let s = closure t1 (IM.map (\(Forall x y) -> Forall x $ subst s1 y) e)
-        (s2, t2) <- polytype (addType s e) e2
+            e' = IM.map (\(Forall s t) -> Forall s $ subst s1 t) e
+        (s2, t2) <- polytype (addType s e') e2
         s3 <- lift . unify $ toRest s1 ++ toRest s2
         return (s3, subst s3 t2)
 polytype e (IxFix l) = do
@@ -155,7 +141,6 @@ polytype e (IxFix l) = do
         (s1, t) <- polytype (addType (Forall IS.empty a) e) l
         s2 <- lift . unify $ (a, t) : toRest s1
         return (s2, subst s2 t)
-polytype _ _ = empty
 
 typeinfer :: IxLam -> Maybe Type
 typeinfer l = snd <$> evalStateT (polytype IM.empty l) 0

@@ -5,9 +5,10 @@ import Term
 import Parser
 import Type
 import qualified Data.IntMap as IM
-import Control.Monad ((>=>))
+import Control.Monad ((>=>), when)
+import Control.Monad.ST
 import Data.List (elemIndex)
-import Data.IORef
+import Data.STRef
 
 toIndexed :: Lambda -> Maybe IxLam
 toIndexed = go [] where
@@ -17,40 +18,41 @@ toIndexed = go [] where
     go xs (Let s a b) = IxLet <$> go xs a <*> go (s:xs) b
     go xs (Fix f e) = IxFix <$> go (f:xs) e
 
-addExpr :: IORef Memory -> Env -> Env
-addExpr l = IM.insert 0 l . IM.mapKeys succ
+reduce :: IxLam -> IxLam
+reduce (IxApp a b) = case reduce a of
+                         IxLam l -> reduce $ runST (newSTRef (True, b) >>= replace 0 l)
+                         c       -> IxApp c (reduce b)
+reduce (IxLam l)   = IxLam (reduce l)
+reduce (IxLet a b) = reduce (IxApp (IxLam b) a)
+reduce f@(IxFix e) = reduce $ runST (newSTRef (False, f) >>= replace 0 e)
+reduce l           = l
 
-reduce :: Env -> IxLam -> IO IxLam
-reduce env (Index i) = do
-        case IM.lookup i env of
-            Nothing -> return $ Index i
-            Just ref -> do
-                v <- readIORef ref
-                case v of
-                    Value e -> return e
-                    Thunk e f -> do
-                        r <- reduce e f
-                        writeIORef ref (Value r)
-                        return r
-reduce env (IxLam l) = return $ Clojure env l
-reduce env (IxLet a b) = do
-        ref <- newIORef (Thunk env a)
-        reduce (addExpr ref env) b
-reduce env (IxApp a b) = do
-        l <- reduce env a
-        case l of
-            Clojure e c -> do
-                ref <- newIORef (Thunk env b)
-                reduce (addExpr ref e) c
-            c -> IxApp c <$> reduce env b
-reduce env f@(IxFix e) = do
-        ref <- newIORef (Thunk env f)
-        reduce (addExpr ref env) e
-reduce _ a = return a
+replace :: Int -> IxLam -> STRef s (Bool, IxLam) -> ST s IxLam
+replace n (Index i) l  = case compare n i of
+                            LT -> return $ Index (i - 1)
+                            EQ -> do
+                                (p, f) <- readSTRef l
+                                when p $ writeSTRef l (False, reduce f)
+                                shift n . snd <$> readSTRef l
+                            GT -> return $ Index i
+replace n (IxApp a b) l = IxApp <$> replace n a l <*> replace n b l
+replace n (IxLam a) b   = IxLam <$> replace (n+1) a b
+replace n (IxLet a b) l = IxLet <$> replace n a l <*> replace (n+1) b l
+replace n (IxFix e) l   = IxFix <$> replace (n+1) e l
 
-eval :: String -> Either String (Type, IO IxLam)
+shift :: Int -> IxLam -> IxLam
+shift m = go 0 where
+    go n (Index i)   = if n <= i
+                           then Index (i + m)
+                           else Index i
+    go n (IxApp a b) = IxApp (go n a) (go n b)
+    go n (IxLam l)   = IxLam $ go (n+1) l
+    go n (IxLet a b) = IxLet (go n a) (go (n+1) b)
+    go n (IxFix e)   = IxFix $ go (n+1) e
+
+eval :: String -> Either String (Type, IxLam)
 eval str = do
         v <- maybe (Left "Could not parse.") Right $ parse assign str
         e <- maybe (Left "This term includes free variable.") Right $ toIndexed v
         t <- maybe (Left "This term has no type.") Right $ typeinfer e
-        return (t, reduce IM.empty e)
+        return (t, reduce e)

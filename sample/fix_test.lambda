@@ -1,0 +1,8 @@
+let succ := \n s z.s (n s z) in
+let pred := \n s z.n (\g h.h (g s)) (\u.z) (\u.u) in
+let true := \t f.t in
+let false := \t f.f in
+let cons := \x y.x in
+let iszero := \n.n (cons false) true in
+let plus := \n m.n succ m in
+\n. plus n n
